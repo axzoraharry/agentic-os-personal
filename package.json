@@ -1,0 +1,11 @@
+{
+  "name": "agentic-os-personal",
+  "private": true,
+  "description": "Root wrapper — Hostinger can deploy from repo root OR content-os/",
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "build": "npm run build --prefix content-os",
+    "start": "npm start --prefix content-os",
+    "postinstall": "npm install --prefix content-os"
+  }
+}
