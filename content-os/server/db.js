@@ -1,4 +1,4 @@
-import Database from "better-sqlite3";
+import Database from "./sqlite.js";
 import { mkdirSync } from "fs";
 import { join } from "path";
 import { createHash } from "crypto";
@@ -10,6 +10,10 @@ mkdirSync(join(ROOT_DIR, "storage", "images"), { recursive: true });
 
 const db = new Database(join(ROOT_DIR, "data", "content-os.sqlite"));
 db.pragma("journal_mode = WAL");
+
+// node-sqlite3-wasm needs an explicit close to finalize statements; flush on exit.
+process.once("exit", () => { try { db.close(); } catch { /* shutting down */ } });
+for (const sig of ["SIGINT", "SIGTERM"]) process.once(sig, () => process.exit(0));
 
 db.exec(`
 CREATE TABLE IF NOT EXISTS app_settings (

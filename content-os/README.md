@@ -15,7 +15,7 @@ Sources  ──►  Scheduler  ──►  Freshness filter  ──►  AI ranker
 
 ## Stack
 
-- **Backend:** Node.js (ESM) + Express + better-sqlite3
+- **Backend:** Node.js (ESM) + Express + SQLite via `node-sqlite3-wasm` (pure WebAssembly — no native build, runs on any host including shared hosting)
 - **Scraping:** `rss-parser` for feeds, [Firecrawl](https://firecrawl.dev) for any URL or web search
 - **AI:** [OpenRouter](https://openrouter.ai) — one key for GPT, Claude, Gemini (text, agentic edits, and 4:3 image generation)
 - **Publishing:** [Zernio](https://zernio.com) — hosted OAuth + scheduling for IG, LinkedIn, X
@@ -127,6 +127,24 @@ Notes:
 - Set the Zernio webhook URL to `https://yourdomain.com/api/webhooks/zernio`
   and a matching `ZERNIO_WEBHOOK_SECRET`.
 - SSE endpoints are excluded from Nginx buffering in the example config.
+
+### Database / shared hosting
+
+The DB engine is `node-sqlite3-wasm` (pure WebAssembly), so `npm install`
+needs **no compiler, `make`, or modern glibc** — it works on shared hosts
+(e.g. Hostinger) where native modules like `better-sqlite3` fail to build.
+
+The wasm VFS does not support WAL journaling; the app runs in the default
+rollback-journal mode automatically. If you are migrating an existing
+`better-sqlite3` database that was in WAL mode, convert it once before first
+boot (otherwise it can't be opened):
+
+```bash
+sqlite3 data/content-os.sqlite "PRAGMA wal_checkpoint(TRUNCATE); PRAGMA journal_mode=DELETE;"
+rm -f data/content-os.sqlite-wal data/content-os.sqlite-shm
+```
+
+A fresh deployment with no existing DB needs none of this.
 
 ## EADDRINUSE
 
