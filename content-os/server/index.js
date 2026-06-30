@@ -570,7 +570,7 @@ app.get("/api/dashboard", (req, res) => {
 // ── SPA fallback ─────────────────────────────────────────────────
 app.get("*", (_req, res) => res.sendFile(join(ROOT_DIR, "public", "index.html")));
 
-app.listen(config.port, () => {
+app.listen(config.port, "0.0.0.0", () => {
   console.log(`\n  Content Agent OS → http://localhost:${config.port}`);
   console.log(`  Services: ${Object.entries(serviceStatus()).map(([k, v]) => `${k} ${v ? "✓" : "✗"}`).join("  ")}`);
   startScheduler();

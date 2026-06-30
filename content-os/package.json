@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "start": "node server/index.js",
+    "build": "node --check server/index.js && node --check server/db.js && node --check server/sqlite.js",
     "dev": "node --watch server/index.js",
     "test:apis": "node scripts/test-apis.js"
   },
