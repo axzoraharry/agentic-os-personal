@@ -1,54 +1,76 @@
 # Deploy on Hostinger (Node.js Web App)
 
-## hPanel settings
+## Quick hPanel settings
 
 | Setting | Value |
 |---------|-------|
-| **Application root** | `content-os` (not the repo root) |
+| **Framework** | Express.js (or **Other**) |
+| **Application root** | `content-os` |
 | **Node.js version** | 20 |
 | **Install command** | `npm install` |
 | **Build command** | `npm run build` |
 | **Start command** | `npm start` |
-| **Entry file** | `server/index.js` (if asked) |
-| **Output directory** | leave empty — no frontend build step |
+| **Entry file** | `app.js` |
+| **Output directory** | leave **empty** |
 
-## Environment variables
+## Environment variables (hPanel → Deployments → Settings)
 
-Add these in hPanel → your app → Environment variables (do **not** commit `.env`):
+Add these in hPanel (do **not** commit `.env`):
 
-- `PORT` — usually set automatically by Hostinger; if missing use `3950`
-- `PUBLIC_BASE_URL` — your live URL, e.g. `https://brown-lion-139149.hostingersite.com`
-- `OPENROUTER_API_KEY`, `FIRECRAWL_API_KEY`, `ZERNIO_API_KEY` (as needed)
-- `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` (for Gmail)
-- `GOOGLE_REDIRECT_URI` — `https://YOUR-DOMAIN/api/gmail/callback`
+| Variable | Example |
+|----------|---------|
+| `PORT` | leave blank — Hostinger sets this (usually `3000`) |
+| `NODE_ENV` | `production` |
+| `PUBLIC_BASE_URL` | `https://brown-lion-139149.hostingersite.com` |
+| `OPENROUTER_API_KEY` | your key |
+| `FIRECRAWL_API_KEY` | your key |
+| `ZERNIO_API_KEY` | your key |
+| `GOOGLE_CLIENT_ID` | your OAuth client |
+| `GOOGLE_CLIENT_SECRET` | your OAuth secret |
+| `GOOGLE_REDIRECT_URI` | `https://YOUR-DOMAIN/api/gmail/callback` |
 
-## Deprecation warnings are OK
+## Deploy via Hostinger MCP in Cursor (recommended)
 
-Lines like `npm warn deprecated uuid@8.3.2` are **warnings only**. If you see:
+1. In **hPanel** → Profile → **API** → create an API token.
+2. In your terminal (or Cursor env), export it:
+   ```bash
+   export HOSTINGER_API_TOKEN="your-token-here"
+   ```
+3. Restart Cursor (project includes `.cursor/mcp.json` for the Hostinger MCP).
+4. Ask the agent: *"Deploy agentic-os to Hostinger and fix any build errors."*
+
+The MCP can pull real build logs, update deploy settings, and trigger redeploys.
+
+## Reading the build log
+
+If you see:
 
 ```
-added 149 packages, and audited 150 packages in 6s
+added 149 packages, and audited 150 packages in 5s
 ```
 
-then **`npm install` succeeded**. Look for the real error **after** that (build or start step).
+**Install succeeded.** Warnings (`npm warn deprecated`) are normal.
 
-## If deploy still fails
-
-1. Open the full build log in hPanel and scroll **past** the npm warnings.
-2. Common causes:
-   - **Wrong root** — must be `content-os`, not repository root
-   - **Missing build script** — fixed in `package.json` (`npm run build`)
-   - **Missing env vars** — app may start but APIs won't work without keys
-   - **Runtime crash** — check app logs for `SQLite3Error` or `EADDRINUSE`
+Scroll further for:
+- `BUILD_OK` → build passed
+- `ERROR` / `npm error` → real failure (paste those lines)
 
 ## Fresh deploy checklist
 
 ```bash
-# In Hostinger SSH (optional verification):
 cd content-os
 npm install
-npm run build
+npm run build    # should print BUILD_OK
 npm start
 ```
 
-The app creates `data/` and `storage/` automatically on first run.
+The app creates `data/` and `storage/` on first run.
+
+## Migrating an old WAL database
+
+Only if you copied a local SQLite file that was in WAL mode:
+
+```bash
+sqlite3 data/content-os.sqlite "PRAGMA wal_checkpoint(TRUNCATE); PRAGMA journal_mode=DELETE;"
+rm -f data/content-os.sqlite-wal data/content-os.sqlite-shm
+```

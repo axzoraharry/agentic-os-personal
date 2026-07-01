@@ -30,9 +30,10 @@ loadEnv();
 export const ROOT_DIR = ROOT;
 
 export const config = {
-  port: Number(process.env.PORT ?? 3950),
+  // Hostinger routes traffic to process.env.PORT (often 3000). Default 3000 in prod.
+  port: Number(process.env.PORT || (process.env.NODE_ENV === "production" ? 3000 : 3950)),
   scrapeConcurrency: Number(process.env.SCRAPE_CONCURRENCY ?? 5),
-  publicBaseUrl: process.env.PUBLIC_BASE_URL ?? `http://localhost:${process.env.PORT ?? 3950}`,
+  publicBaseUrl: process.env.PUBLIC_BASE_URL ?? `http://localhost:${process.env.PORT || 3000}`,
 
   firecrawlApiKey: process.env.FIRECRAWL_API_KEY ?? "",
 
@@ -47,7 +48,7 @@ export const config = {
   googleClientSecret: process.env.GOOGLE_CLIENT_SECRET ?? "",
   googleRedirectUri:
     process.env.GOOGLE_REDIRECT_URI ??
-    `${process.env.PUBLIC_BASE_URL ?? `http://localhost:${process.env.PORT ?? 3950}`}/api/gmail/callback`,
+    `${process.env.PUBLIC_BASE_URL ?? `http://localhost:${process.env.PORT || 3000}`}/api/gmail/callback`,
 
   // Seed defaults — the live values are stored in app_settings (DB) and
   // editable from the Settings tab. These only seed the first run.
