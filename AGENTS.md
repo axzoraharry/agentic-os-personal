@@ -6,6 +6,7 @@ This repo ships project-level Cursor skills for web scraping and automation. Age
 
 | Skill | When to use |
 |-------|-------------|
+| [hostinger-deploy](.cursor/skills/hostinger-deploy/SKILL.md) | Deploy or fix Node.js apps on Hostinger via MCP |
 | [scraper-intake](.cursor/skills/scraper-intake/SKILL.md) | **Always first** for new scrape/automation work — routes script vs dashboard |
 | [scraper-script](.cursor/skills/scraper-script/SKILL.md) | CLI/headless scripts, cron jobs, one-off extracts |
 | [scraper-dashboard](.cursor/skills/scraper-dashboard/SKILL.md) | Full browser OS with job queue, live logs, history, export |
