@@ -2,10 +2,7 @@
   "mcpServers": {
     "hostinger": {
       "command": "npx",
-      "args": ["-y", "hostinger-api-mcp"],
-      "env": {
-        "HOSTINGER_API_TOKEN": "${HOSTINGER_API_TOKEN}"
-      }
+      "args": ["-y", "hostinger-api-mcp"]
     }
   }
 }
