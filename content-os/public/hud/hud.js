@@ -216,8 +216,16 @@ const voice = {
   conversing: false,   // continuous loop active
   recording: false,
   stream: null, audioCtx: null, analyser: null, recorder: null, levelRAF: 0,
+  serverStt: true,     // false once server transcription proves unavailable
+  recognition: null,   // active browser SpeechRecognition, when falling back
 };
 const VAD = { speakThresh: 0.045, silenceMs: 1300, noSpeechMs: 7000, maxTurnMs: 20000 };
+
+// Transcription errors that mean the server path is out for the session (no
+// key, no balance, dead model) rather than a transient blip. Declared here
+// beside VAD so it is initialised well before any turn can reference it.
+const STT_UNAVAILABLE =
+  /balance|credits?|insufficient|quota|payment|not configured|unauthoriz|forbidden|\b40[1234]\b/i;
 
 function setAssistantState(state, label) {
   const el = $("#assistantStatus");
@@ -386,6 +394,7 @@ async function sendToAssistant(text, { speakReply = false } = {}) {
 // end-of-speech via simple VAD, then transcribe and hand off to the assistant.
 async function recordTurn() {
   if (voice.recording) return;
+  if (!voice.serverStt && speechRecognitionCtor()) return recordTurnBrowser();
   try {
     voice.stream = await navigator.mediaDevices.getUserMedia({ audio: true });
   } catch {
@@ -457,6 +466,18 @@ async function recordTurn() {
       await sendToAssistant(said, { speakReply: true });
       if (voice.conversing) recordTurn();          // continuous: listen again
     } catch (e) {
+      // A missing key, an empty balance or a dead model means server
+      // transcription is out for the whole session, not just this turn — drop
+      // to the browser recognizer for good. Transient errors keep the server.
+      if (voice.serverStt && speechRecognitionCtor() && STT_UNAVAILABLE.test(e.message || "")) {
+        voice.serverStt = false;
+        toast("Server transcription unavailable — using browser voice");
+        setAssistantState("idle", "Idle");
+        // This turn's audio cannot be replayed into the browser recognizer,
+        // so listen again rather than silently dropping what was just said.
+        if (voice.conversing) return recordTurnBrowser();
+        return;
+      }
       toast(e.message, "error");
       setAssistantState("idle", "Idle");
       stopConversation();
@@ -467,6 +488,128 @@ async function recordTurn() {
   voice.levelRAF = requestAnimationFrame(loop);
 }
 
+// ── Browser speech-recognition fallback ──────────────────────────
+//
+// The server path records audio and uploads it. The Web Speech API cannot
+// accept recorded audio — it captures the mic itself — so falling back means
+// replacing the whole capture path for the turn, not just the transcribe step.
+// Chrome and Edge support it; Firefox and Safari do not.
+
+function speechRecognitionCtor() {
+  return window.SpeechRecognition || window.webkitSpeechRecognition || null;
+}
+
+// Drive the globe waves while the recognizer listens. Best effort only: the
+// recognizer owns its own capture, so if a second getUserMedia is refused we
+// skip the animation rather than fail the turn.
+async function startLevelMeter() {
+  let stream = null, ctx = null, raf = 0;
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const analyser = ctx.createAnalyser();
+    analyser.fftSize = 1024;
+    ctx.createMediaStreamSource(stream).connect(analyser);
+    const buf = new Uint8Array(analyser.fftSize);
+    const loop = () => {
+      analyser.getByteTimeDomainData(buf);
+      let sum = 0;
+      for (let i = 0; i < buf.length; i++) { const v = (buf[i] - 128) / 128; sum += v * v; }
+      setLevel(Math.min(1, Math.sqrt(sum / buf.length) * 4));
+      raf = requestAnimationFrame(loop);
+    };
+    raf = requestAnimationFrame(loop);
+  } catch { /* no meter — recognition still works */ }
+  return () => {
+    cancelAnimationFrame(raf);
+    try { stream?.getTracks().forEach((t) => t.stop()); } catch {}
+    try { ctx?.close(); } catch {}
+    setLevel(0);
+  };
+}
+
+// One turn via the browser recognizer. Mirrors recordTurn's contract: fills the
+// input, hands off to the assistant, and re-listens while conversing.
+async function recordTurnBrowser() {
+  const Ctor = speechRecognitionCtor();
+  if (!Ctor) {
+    toast("Voice input needs Chrome or Edge — type your request instead", "error");
+    stopConversation();
+    $("#assistantInput")?.focus();
+    return;
+  }
+  if (voice.recording) return;
+
+  const rec = new Ctor();
+  rec.lang = navigator.language || "en-US";
+  rec.interimResults = false;
+  rec.maxAlternatives = 1;
+  rec.continuous = false;   // one utterance per turn, matching the VAD path
+
+  voice.recognition = rec;
+  voice.recording = true;
+  setAssistantState("listening", "Listening…");
+  const stopMeter = await startLevelMeter();
+
+  let said = "";
+  let settled = false;
+  const cleanup = () => {
+    voice.recording = false;
+    voice.recognition = null;
+    stopMeter();
+  };
+
+  rec.onresult = (e) => {
+    said = Array.from(e.results).map((r) => r[0].transcript).join(" ").trim();
+  };
+
+  rec.onerror = (e) => {
+    if (settled) return;
+    settled = true;
+    cleanup();
+    if (e.error === "aborted") { setAssistantState("idle", "Idle"); return; }
+    if (e.error === "no-speech") {
+      setAssistantState("idle", "Idle");
+      if (voice.conversing) toast("Didn't catch that — tap to try again");
+      stopConversation();
+      return;
+    }
+    if (e.error === "not-allowed" || e.error === "service-not-allowed") {
+      toast("Microphone blocked — type your request instead", "error");
+      stopConversation();
+      $("#assistantInput")?.focus();
+      return;
+    }
+    toast(`Voice input failed (${e.error})`, "error");
+    stopConversation();
+  };
+
+  rec.onend = async () => {
+    if (settled) return;   // onerror already handled this turn
+    settled = true;
+    cleanup();
+    const text = said.trim();
+    if (!text) {
+      setAssistantState("idle", "Idle");
+      if (voice.conversing) toast("Didn't catch that — tap to try again");
+      stopConversation();
+      return;
+    }
+    if (/^\s*(stop|cancel|that's all|thank you,? jarvis)\.?\s*$/i.test(text)) { stopConversation(); return; }
+    $("#assistantInput").value = text;
+    await sendToAssistant(text, { speakReply: true });
+    if (voice.conversing) recordTurnBrowser();
+  };
+
+  try {
+    rec.start();
+  } catch {
+    settled = true;
+    cleanup();
+    setAssistantState("idle", "Idle");
+  }
+}
+
 function startConversation() {
   if (voice.conversing) return;
   voice.conversing = true;
@@ -475,6 +618,7 @@ function startConversation() {
 function stopConversation() {
   voice.conversing = false;
   if (voice.recording) { try { voice.recorder.stop(); } catch {} }
+  if (voice.recognition) { try { voice.recognition.abort(); } catch {} }
   setLevel(0);
   setAssistantState("idle", "Idle");
 }

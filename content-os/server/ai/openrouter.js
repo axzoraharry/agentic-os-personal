@@ -6,6 +6,14 @@ import { getSetting } from "../db.js";
 
 const BASE = "https://openrouter.ai/api/v1";
 
+// Cap completion length. Without max_tokens OpenRouter bills against the
+// model's own ceiling (65k+ on some models), which it refuses upfront when the
+// balance cannot cover the worst case — so an unset value fails outright on
+// low-balance accounts. Every caller here produces short output (captions,
+// spoken answers, image prompts, rank JSON), so a modest default is both
+// cheaper and safer. Override with OPENROUTER_MAX_TOKENS.
+const DEFAULT_MAX_TOKENS = Number(process.env.OPENROUTER_MAX_TOKENS || 4096);
+
 function requireKey() {
   if (!config.openrouterApiKey) {
     throw new Error("OpenRouter not configured — set OPENROUTER_API_KEY in .env");
@@ -60,7 +68,9 @@ async function postChat(payload) {
   const res = await fetch(`${BASE}/chat/completions`, {
     method: "POST",
     headers: headers(),
-    body: JSON.stringify(payload),
+    // Applied here rather than per-caller so no call site can omit it. An
+    // explicit max_tokens in the payload still wins.
+    body: JSON.stringify({ max_tokens: DEFAULT_MAX_TOKENS, ...payload }),
   });
   const json = await res.json().catch(() => ({}));
   if (!res.ok) {
@@ -82,11 +92,12 @@ export async function chat(messages, { model, temperature = 0.7, maxTokens } = {
 
 // Completion constrained to a JSON object. Falls back to brace-extraction
 // if a model wraps the JSON in prose.
-export async function chatJSON(messages, { model, temperature = 0.3 } = {}) {
+export async function chatJSON(messages, { model, temperature = 0.3, maxTokens } = {}) {
   const json = await postChat({
     model: model || textModel(),
     messages,
     temperature,
+    ...(maxTokens ? { max_tokens: maxTokens } : {}),
     response_format: { type: "json_object" },
   });
   const content = json.choices?.[0]?.message?.content ?? "";
