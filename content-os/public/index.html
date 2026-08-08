@@ -102,13 +102,20 @@
           <div class="mail-list" id="mailList"></div>
         </div>
 
-        <!-- Content system tile -->
+        <!-- Content system tile (Growth / empire fuse) -->
         <div class="hud-panel hud-content" id="contentTile">
           <div class="content-card">
             <div class="cc-head">
               <span class="ct-icon">◎</span>
-              <span class="ct-title">Content System</span>
+              <span class="ct-title">Growth · Content-OS</span>
             </div>
+            <div class="cc-metrics" id="contentMetrics">
+              <div class="cc-metric"><span class="lbl">Feed</span><span class="val" id="gmFeed">—</span></div>
+              <div class="cc-metric"><span class="lbl">Shortlist</span><span class="val" id="gmShort">—</span></div>
+              <div class="cc-metric"><span class="lbl">Drafts</span><span class="val" id="gmDrafts">—</span></div>
+              <div class="cc-metric"><span class="lbl">Outbox</span><span class="val" id="gmOutbox">—</span></div>
+            </div>
+            <div class="cc-svc" id="contentSvc"></div>
             <div class="cc-list" id="contentLatest">
               <div class="hud-empty">Loading latest content…</div>
             </div>

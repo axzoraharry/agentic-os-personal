@@ -37,9 +37,65 @@ Required keys in `.env`:
 | `OPENROUTER_API_KEY` | https://openrouter.ai/keys |
 | `FIRECRAWL_API_KEY` | https://firecrawl.dev |
 | `ZERNIO_API_KEY` | https://zernio.com dashboard |
+| `AGENT_API_KEY` | Optional. Local agents work on loopback without it; set for remote Commander |
 
 The app runs without keys, but scraping/ranking/publishing for those services
 will return a clear "not configured" error until the key is set.
+
+## Agent control plane (option 2)
+
+Content-OS exposes a **subordinate agent API** so Mr. Happy Commander / Happy Agents
+can drive the content loop without the browser UI.
+
+| Endpoint | Purpose |
+|----------|---------|
+| `GET /api/agent/tools` | Tool catalog + Commander prompt block |
+| `GET /api/agent/prompt` | Plain-text system prompt for agents |
+| `POST /api/agent/invoke` | Single RPC: `{ "tool": "list_feed", "arguments": {} }` |
+| REST under `/api/agent/*` | Same tools as REST (feed, approve, briefs, studio, schedule) |
+
+Auth:
+
+- If `AGENT_API_KEY` is set → `Authorization: Bearer <key>` or `X-Agent-Key: <key>`
+- If unset → **loopback only** (safe local mesh)
+
+Example:
+
+```bash
+# Catalog
+curl -s http://localhost:3950/api/agent/tools | head
+
+# List ranked feed
+curl -s -X POST http://localhost:3950/api/agent/invoke \
+  -H 'Content-Type: application/json' \
+  -d '{"tool":"list_feed","arguments":{"limit":10,"min_score":60}}'
+
+# Approve + create brief + image
+curl -s -X POST http://localhost:3950/api/agent/invoke \
+  -H 'Content-Type: application/json' \
+  -d '{"tool":"approve_article","arguments":{"id":"<ARTICLE_ID>"}}'
+```
+
+Full tool names and agent wiring: [`docs/AGENT_API.md`](docs/AGENT_API.md).
+
+### Termux / proot (option 1)
+
+```bash
+cd content-os
+bash deploy/termux-setup.sh   # or: npm run setup:termux
+./start-termux.sh
+```
+
+Details: [`docs/TERMUX.md`](docs/TERMUX.md). CLI: `npm run agent -- empire`.
+
+### Empire dashboard fuse (option 3)
+
+```http
+GET /api/agent/empire-status
+```
+
+Embed card: `/empire/panel.html` · script `/empire/embed.js`  
+Docs: [`docs/EMPIRE_FUSE.md`](docs/EMPIRE_FUSE.md).
 
 ## How to use it
 

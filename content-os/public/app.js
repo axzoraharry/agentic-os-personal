@@ -61,11 +61,41 @@ $("#enterContent")?.addEventListener("click", enterContentSystem);
 $("#backToHud")?.addEventListener("click", () => showView("home"));
 $("#homeSettings")?.addEventListener("click", () => showView("settings"));
 
-// Latest generated content, shown inside the HUD's Content System tile. Clicking
-// an item jumps straight into the Studio with that draft open.
+// Growth tile: empire-status metrics + latest drafts. Clicking a draft opens Studio.
 async function loadContentLatest() {
   const box = $("#contentLatest");
   if (!box) return;
+
+  // Prefer agent empire snapshot (works on loopback without AGENT_API_KEY).
+  try {
+    const snap = await api("/api/agent/empire-status");
+    const set = (id, v) => { const el = $(id); if (el) el.textContent = v; };
+    set("#gmFeed", snap.feed?.fresh_total ?? 0);
+    set("#gmShort", snap.feed?.shortlisted ?? 0);
+    set("#gmDrafts", snap.studio?.drafts ?? 0);
+    set("#gmOutbox", snap.outbox?.scheduled ?? 0);
+    const svc = $("#contentSvc");
+    if (svc && snap.services) {
+      const s = snap.services;
+      svc.innerHTML = [
+        `FC ${s.firecrawl ? "✓" : "✗"}`,
+        `OR ${s.openrouter ? "✓" : "✗"}`,
+        `ZN ${s.zernio ? "✓" : "✗"}`,
+      ].join(" · ");
+    }
+    if (snap.feed?.top?.length) {
+      box.innerHTML = snap.feed.top.slice(0, 4).map((a) => `
+        <div class="cc-item" data-article="${escapeHtml(a.id)}">
+          <div class="cc-item-title">${escapeHtml(a.title || "Untitled")}</div>
+          <div class="cc-item-meta"><span class="badge">${escapeHtml(String(a.priority_score ?? "—"))}</span> · ${escapeHtml(a.status || "")}</div>
+        </div>`).join("");
+      $$(".cc-item", box).forEach((el) => el.addEventListener("click", () => showView("feed")));
+      return;
+    }
+  } catch {
+    /* fall through to drafts */
+  }
+
   try {
     const drafts = await api("/api/drafts");
     if (!drafts.length) {
