@@ -6,9 +6,11 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "build": "node --check server.js && node --check app.js && node --check server/index.js && node --check server/db.js && node --check server/sqlite.js && echo BUILD_OK",
+    "build": "node --check server.js && node --check app.js && node --check server/index.js && node --check server/db.js && node --check server/sqlite.js && node --check server/agent/auth.js && node --check server/agent/tools.js && node --check server/agent/validate.js && node --check server/agent/router.js && node --check scripts/agent-cli.js && echo BUILD_OK",
     "dev": "node --watch server/index.js",
-    "test:apis": "node scripts/test-apis.js"
+    "test:apis": "node scripts/test-apis.js",
+    "agent": "node scripts/agent-cli.js",
+    "setup:termux": "bash deploy/termux-setup.sh"
   },
   "engines": {
     "node": ">=20"
