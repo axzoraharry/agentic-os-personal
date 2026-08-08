@@ -572,7 +572,24 @@ app.get("/api/dashboard", (req, res) => {
 });
 
 // ── SPA fallback ─────────────────────────────────────────────────
-app.get("*", (_req, res) => res.sendFile(join(ROOT_DIR, "public", "index.html")));
+//
+// Only extensionless paths are client-side routes. Sending index.html for
+// anything else turns every mistyped or missing asset into a silent 200 that
+// renders the HUD, which is indistinguishable from success — so a wrong URL
+// looks like a broken page rather than a 404.
+app.get("*", (req, res) => {
+  // Unmatched API paths must answer in JSON, not HTML, or clients parsing the
+  // response see a dashboard where they expected an error object.
+  if (req.path.startsWith("/api/")) {
+    return fail(res, 404, `No such endpoint: ${req.method} ${req.path}`);
+  }
+  // Anything with a file extension is an asset request. If it existed, the
+  // static middleware would already have served it.
+  if (/\.[a-z0-9]+$/i.test(req.path)) {
+    return res.status(404).type("text/plain").send(`404 Not Found: ${req.path}`);
+  }
+  res.sendFile(join(ROOT_DIR, "public", "index.html"));
+});
 
 app.listen(config.port, "0.0.0.0", () => {
   console.log(`\n  Content Agent OS → http://localhost:${config.port}`);
