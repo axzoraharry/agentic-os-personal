@@ -1,0 +1,386 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Voice diagnostics · Content-OS</title>
+<style>
+  :root {
+    --bg: #060a12; --card: #0b1220; --border: #1e2a44; --fg: #e8eefc;
+    --muted: #7a88a8; --ok: #5dffa8; --okbg: #0f3d2e;
+    --bad: #ff8b8b; --badbg: #3d1515; --warn: #ffd166; --warnbg: #3d3115;
+    --accent: #7eb6ff;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 24px 16px 48px; background: var(--bg); color: var(--fg);
+    font: 14px/1.5 ui-sans-serif, system-ui, -apple-system, sans-serif;
+  }
+  .wrap { max-width: 760px; margin: 0 auto; }
+  h1 { font-size: 1.15rem; margin: 0 0 4px; letter-spacing: .01em; }
+  .sub { color: var(--muted); font-size: .82rem; margin-bottom: 20px; }
+  .sub code { color: var(--accent); }
+  .card {
+    background: var(--card); border: 1px solid var(--border);
+    border-radius: 12px; padding: 16px; margin-bottom: 14px;
+  }
+  .card h2 {
+    font-size: .7rem; text-transform: uppercase; letter-spacing: .08em;
+    color: var(--accent); margin: 0 0 12px; font-weight: 700;
+  }
+  .row {
+    display: flex; align-items: center; gap: 10px; padding: 6px 0;
+    border-bottom: 1px solid rgba(255,255,255,.04);
+  }
+  .row:last-child { border-bottom: 0; }
+  .row .k { flex: 1 1 auto; min-width: 0; }
+  .row .k small { display: block; color: var(--muted); font-size: .74rem; }
+  .chip {
+    flex: 0 0 auto; font-size: .68rem; font-weight: 700; padding: 3px 9px;
+    border-radius: 999px; text-transform: uppercase; letter-spacing: .04em;
+  }
+  .chip.ok { background: var(--okbg); color: var(--ok); }
+  .chip.bad { background: var(--badbg); color: var(--bad); }
+  .chip.warn { background: var(--warnbg); color: var(--warn); }
+  .chip.pending { background: #222a3a; color: var(--muted); }
+  button {
+    background: #16213a; color: var(--fg); border: 1px solid var(--border);
+    border-radius: 8px; padding: 9px 14px; font: inherit; font-size: .84rem;
+    cursor: pointer; margin: 0 8px 8px 0;
+  }
+  button:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+  button:disabled { opacity: .45; cursor: not-allowed; }
+  .meter { height: 8px; background: #16213a; border-radius: 999px; overflow: hidden; margin-top: 10px; }
+  .meter i { display: block; height: 100%; width: 0; background: linear-gradient(90deg, var(--accent), var(--ok)); transition: width .06s linear; }
+  .transcript {
+    margin-top: 10px; padding: 10px 12px; background: #070d18; border: 1px solid var(--border);
+    border-radius: 8px; min-height: 44px; font-size: .9rem;
+  }
+  .transcript:empty::before { content: "(nothing yet)"; color: var(--muted); }
+  pre#log {
+    margin: 0; padding: 12px; background: #070d18; border: 1px solid var(--border);
+    border-radius: 8px; max-height: 300px; overflow: auto; font-size: .76rem;
+    line-height: 1.5; white-space: pre-wrap; word-break: break-word; color: #c9d4ea;
+  }
+  .verdict { margin-top: 12px; font-size: .84rem; }
+  .note { color: var(--muted); font-size: .78rem; margin-top: 10px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Voice diagnostics</h1>
+  <div class="sub">
+    Temporary tool for checking the mic path. Must be served from
+    <code>http://localhost:3950</code> — a LAN IP is not a secure context and both
+    mic paths will fail there.
+  </div>
+
+  <div class="card">
+    <h2>Environment</h2>
+    <div id="env"></div>
+  </div>
+
+  <div class="card">
+    <h2>Server voice endpoints</h2>
+    <button id="btnServer">Probe /speak and /transcribe</button>
+    <div id="server"></div>
+    <div class="note">
+      Round-trips real audio: synthesises speech via <code>/api/assistant/speak</code>,
+      then feeds that audio back into <code>/api/assistant/transcribe</code>. This is
+      what decides whether the HUD uses the server path or falls back to the browser.
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Microphone</h2>
+    <button id="btnMeter">Test mic + level meter (5s)</button>
+    <button id="btnRec">Test browser recognizer</button>
+    <button id="btnBoth">Test both together (the real question)</button>
+    <div class="meter"><i id="meterBar"></i></div>
+    <div class="transcript" id="transcript"></div>
+    <div id="mic"></div>
+    <div class="note">
+      "Both together" is the case the automated tests could not cover: the level
+      meter opens its own <code>getUserMedia</code> while the recognizer runs its own
+      capture. If the meter moves and a transcript arrives, concurrent capture works.
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Log</h2>
+    <button id="btnCopy">Copy log</button>
+    <button id="btnClear">Clear</button>
+    <pre id="log"></pre>
+  </div>
+</div>
+
+<script>
+const $ = (s) => document.querySelector(s);
+const logEl = $("#log");
+
+function log(msg, data) {
+  const t = new Date().toISOString().slice(11, 23);
+  let line = `[${t}] ${msg}`;
+  if (data !== undefined) {
+    try { line += " " + (typeof data === "string" ? data : JSON.stringify(data)); }
+    catch { line += " [unserialisable]"; }
+  }
+  logEl.textContent += line + "\n";
+  logEl.scrollTop = logEl.scrollHeight;
+}
+
+function row(container, label, sub, state, chipText) {
+  const div = document.createElement("div");
+  div.className = "row";
+  div.innerHTML =
+    `<div class="k">${label}${sub ? `<small>${sub}</small>` : ""}</div>` +
+    `<span class="chip ${state}">${chipText}</span>`;
+  container.appendChild(div);
+  return div;
+}
+
+function speechCtor() {
+  return window.SpeechRecognition || window.webkitSpeechRecognition || null;
+}
+
+// ── Environment ──────────────────────────────────────────────────
+(function checkEnv() {
+  const box = $("#env");
+  const secure = window.isSecureContext === true;
+  const localhost = ["localhost", "127.0.0.1", "::1", "[::1]"].includes(location.hostname);
+  const media = !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
+  const Rec = speechCtor();
+  const recorder = typeof MediaRecorder !== "undefined";
+  const opus = recorder && MediaRecorder.isTypeSupported("audio/webm;codecs=opus");
+  const audioCtx = !!(window.AudioContext || window.webkitAudioContext);
+
+  row(box, "Origin", location.origin, localhost ? "ok" : "warn", localhost ? "localhost" : "not localhost");
+  row(box, "Secure context", secure ? "mic APIs permitted here" : "mic APIs are blocked on insecure origins",
+      secure ? "ok" : "bad", secure ? "yes" : "no");
+  row(box, "navigator.mediaDevices", media ? "getUserMedia available" : "undefined — server mic path cannot run",
+      media ? "ok" : "bad", media ? "present" : "missing");
+  row(box, "SpeechRecognition", Rec ? (window.SpeechRecognition ? "standard" : "webkit-prefixed") : "not in this browser — fallback unavailable",
+      Rec ? "ok" : "bad", Rec ? "present" : "missing");
+  row(box, "MediaRecorder", opus ? "webm/opus supported" : recorder ? "no webm/opus" : "missing",
+      opus ? "ok" : "warn", recorder ? (opus ? "opus" : "limited") : "missing");
+  row(box, "AudioContext", audioCtx ? "level meter can run" : "no level meter", audioCtx ? "ok" : "warn", audioCtx ? "present" : "missing");
+  row(box, "Recognizer language", navigator.language || "(unset)", "ok", navigator.language || "default");
+  row(box, "User agent", navigator.userAgent, "pending", "info");
+
+  log("environment", { origin: location.origin, secure, localhost, media, speechRecognition: !!Rec, opus, audioCtx, lang: navigator.language });
+
+  if (!secure) log("VERDICT: insecure origin — neither mic path can work. Use http://localhost:3950.");
+  else if (!Rec) log("VERDICT: no SpeechRecognition — browser fallback unavailable in this browser (needs Chrome or Edge).");
+})();
+
+// ── Server endpoints ─────────────────────────────────────────────
+$("#btnServer").addEventListener("click", async () => {
+  const btn = $("#btnServer");
+  const box = $("#server");
+  btn.disabled = true;
+  box.innerHTML = "";
+  try {
+    log("POST /api/assistant/speak …");
+    let ttsBytes = 0, ttsMime = "", b64 = "";
+    try {
+      const r = await fetch("/api/assistant/speak", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: "Diagnostic check. One two three." }),
+      });
+      const j = await r.json();
+      if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);
+      b64 = j.audio || "";
+      ttsMime = j.mime || "";
+      ttsBytes = Math.round((b64.length * 3) / 4);
+      row(box, "Text-to-speech", `${ttsMime}, ~${ttsBytes.toLocaleString()} bytes`, "ok", "works");
+      log("speak ok", { mime: ttsMime, bytes: ttsBytes });
+    } catch (e) {
+      row(box, "Text-to-speech", e.message, "bad", "failed");
+      log("speak FAILED", e.message);
+    }
+
+    if (b64) {
+      log("POST /api/assistant/transcribe (feeding the audio back) …");
+      try {
+        const r = await fetch("/api/assistant/transcribe", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ audio: b64, format: "mp3" }),
+        });
+        const j = await r.json();
+        if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);
+        row(box, "Speech-to-text (server)", `heard: “${(j.text || "").trim()}”`, "ok", "works");
+        row(box, "Active STT path", "server transcription is healthy — no fallback needed", "ok", "server");
+        log("transcribe ok", j.text);
+      } catch (e) {
+        const permanent = /balance|credits?|insufficient|quota|payment|not configured|unauthoriz|forbidden|\b40[1234]\b/i.test(e.message);
+        row(box, "Speech-to-text (server)", e.message, "bad", "failed");
+        row(box, "Active STT path",
+            permanent
+              ? "matches the permanent-failure pattern — HUD will switch to the browser recognizer"
+              : "looks transient — HUD will keep retrying the server, not fall back",
+            permanent ? "warn" : "bad",
+            permanent ? "browser fallback" : "server (retrying)");
+        log("transcribe FAILED", { message: e.message, treatedAsPermanent: permanent });
+      }
+    }
+  } finally {
+    btn.disabled = false;
+  }
+});
+
+// ── Level meter ──────────────────────────────────────────────────
+async function runMeter(ms) {
+  const bar = $("#meterBar");
+  let stream = null, ctx = null, raf = 0, peak = 0;
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  } catch (e) {
+    log("level meter getUserMedia FAILED", `${e.name}: ${e.message}`);
+    return { ok: false, error: `${e.name}: ${e.message}`, peak: 0 };
+  }
+  try {
+    ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const analyser = ctx.createAnalyser();
+    analyser.fftSize = 1024;
+    ctx.createMediaStreamSource(stream).connect(analyser);
+    const buf = new Uint8Array(analyser.fftSize);
+    const loop = () => {
+      analyser.getByteTimeDomainData(buf);
+      let sum = 0;
+      for (let i = 0; i < buf.length; i++) { const v = (buf[i] - 128) / 128; sum += v * v; }
+      const level = Math.min(1, Math.sqrt(sum / buf.length) * 4);
+      if (level > peak) peak = level;
+      bar.style.width = (level * 100).toFixed(1) + "%";
+      raf = requestAnimationFrame(loop);
+    };
+    raf = requestAnimationFrame(loop);
+    await new Promise((r) => setTimeout(r, ms));
+  } finally {
+    cancelAnimationFrame(raf);
+    try { stream.getTracks().forEach((t) => t.stop()); } catch {}
+    try { ctx && ctx.close(); } catch {}
+    bar.style.width = "0%";
+  }
+  return { ok: true, peak };
+}
+
+$("#btnMeter").addEventListener("click", async () => {
+  const btn = $("#btnMeter"), box = $("#mic");
+  btn.disabled = true; box.innerHTML = "";
+  log("level meter: speak now (5s) …");
+  const r = await runMeter(5000);
+  if (!r.ok) row(box, "Mic + level meter", r.error, "bad", "failed");
+  else if (r.peak < 0.02) row(box, "Mic + level meter", `opened, but peak level was only ${r.peak.toFixed(3)} — mic may be muted or silent`, "warn", "no signal");
+  else row(box, "Mic + level meter", `peak level ${r.peak.toFixed(3)}`, "ok", "works");
+  log("level meter done", r);
+  btn.disabled = false;
+});
+
+// ── Browser recognizer ───────────────────────────────────────────
+function runRecognizer() {
+  return new Promise((resolve) => {
+    const Rec = speechCtor();
+    if (!Rec) return resolve({ ok: false, error: "SpeechRecognition unavailable" });
+    const rec = new Rec();
+    rec.lang = navigator.language || "en-US";
+    rec.interimResults = true;
+    rec.maxAlternatives = 1;
+    rec.continuous = false;
+    const tr = $("#transcript");
+    let finalText = "", settled = false;
+    const done = (r) => { if (!settled) { settled = true; resolve(r); } };
+
+    rec.onstart = () => log("recognizer: started");
+    rec.onaudiostart = () => log("recognizer: audio capture started");
+    rec.onspeechstart = () => log("recognizer: speech detected");
+    rec.onresult = (e) => {
+      let interim = "";
+      for (const res of e.results) {
+        if (res.isFinal) finalText += res[0].transcript;
+        else interim += res[0].transcript;
+      }
+      tr.textContent = (finalText + " " + interim).trim();
+      log("recognizer: result", { final: finalText.trim(), interim: interim.trim() });
+    };
+    rec.onerror = (e) => { log("recognizer: ERROR", e.error); done({ ok: false, error: e.error }); };
+    rec.onend = () => { log("recognizer: ended"); done({ ok: !!finalText.trim(), text: finalText.trim() }); };
+
+    try { rec.start(); }
+    catch (e) { done({ ok: false, error: `start threw: ${e.message}` }); }
+  });
+}
+
+$("#btnRec").addEventListener("click", async () => {
+  const btn = $("#btnRec"), box = $("#mic");
+  btn.disabled = true; box.innerHTML = ""; $("#transcript").textContent = "";
+  log("recognizer: say something …");
+  const r = await runRecognizer();
+  if (r.ok) row(box, "Browser recognizer", `heard: “${r.text}”`, "ok", "works");
+  else row(box, "Browser recognizer", r.error === "no-speech" ? "no speech detected — try again and speak sooner" : String(r.error), r.error === "no-speech" ? "warn" : "bad", r.error === "no-speech" ? "no speech" : "failed");
+  btn.disabled = false;
+});
+
+// ── Both at once: the concurrent-capture question ────────────────
+$("#btnBoth").addEventListener("click", async () => {
+  const btn = $("#btnBoth"), box = $("#mic");
+  btn.disabled = true; box.innerHTML = ""; $("#transcript").textContent = "";
+  log("CONCURRENT TEST: level meter + recognizer together. Speak now …");
+
+  let peak = 0, meterError = null;
+  const bar = $("#meterBar");
+  let stream = null, ctx = null, raf = 0;
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const analyser = ctx.createAnalyser();
+    analyser.fftSize = 1024;
+    ctx.createMediaStreamSource(stream).connect(analyser);
+    const buf = new Uint8Array(analyser.fftSize);
+    const loop = () => {
+      analyser.getByteTimeDomainData(buf);
+      let sum = 0;
+      for (let i = 0; i < buf.length; i++) { const v = (buf[i] - 128) / 128; sum += v * v; }
+      const level = Math.min(1, Math.sqrt(sum / buf.length) * 4);
+      if (level > peak) peak = level;
+      bar.style.width = (level * 100).toFixed(1) + "%";
+      raf = requestAnimationFrame(loop);
+    };
+    raf = requestAnimationFrame(loop);
+    log("concurrent: level meter running");
+  } catch (e) {
+    meterError = `${e.name}: ${e.message}`;
+    log("concurrent: level meter FAILED (this is the conflict we are looking for)", meterError);
+  }
+
+  const rec = await runRecognizer();
+
+  cancelAnimationFrame(raf);
+  try { stream && stream.getTracks().forEach((t) => t.stop()); } catch {}
+  try { ctx && ctx.close(); } catch {}
+  bar.style.width = "0%";
+
+  const meterOk = !meterError && peak > 0.02;
+  row(box, "Level meter (concurrent)", meterError || `peak level ${peak.toFixed(3)}`, meterOk ? "ok" : meterError ? "bad" : "warn", meterOk ? "works" : meterError ? "blocked" : "no signal");
+  row(box, "Recognizer (concurrent)", rec.ok ? `heard: “${rec.text}”` : String(rec.error), rec.ok ? "ok" : "bad", rec.ok ? "works" : "failed");
+
+  const verdict = document.createElement("div");
+  verdict.className = "verdict";
+  if (meterOk && rec.ok) verdict.innerHTML = "<b style='color:var(--ok)'>Concurrent capture works.</b> Keep the level meter in the fallback path — the globe will animate while the recognizer listens.";
+  else if (rec.ok && !meterOk) verdict.innerHTML = "<b style='color:var(--warn)'>Recognizer works, meter does not.</b> The fallback is functional but the globe will sit still. Removing the meter is a two-line change.";
+  else if (!rec.ok && meterOk) verdict.innerHTML = "<b style='color:var(--bad)'>The meter appears to be starving the recognizer.</b> Drop the level meter from the fallback path.";
+  else verdict.innerHTML = "<b style='color:var(--bad)'>Both failed.</b> Check the environment card above — most likely an insecure origin or a denied mic permission.";
+  box.appendChild(verdict);
+
+  log("CONCURRENT RESULT", { meterOk, meterError, peak: Number(peak.toFixed(3)), recognizerOk: rec.ok, transcript: rec.text || null, error: rec.error || null });
+  btn.disabled = false;
+});
+
+// ── Log helpers ──────────────────────────────────────────────────
+$("#btnCopy").addEventListener("click", async () => {
+  try { await navigator.clipboard.writeText(logEl.textContent); log("(log copied to clipboard)"); }
+  catch { log("(clipboard blocked — select the text manually)"); }
+});
+$("#btnClear").addEventListener("click", () => { logEl.textContent = ""; });
+</script>
+</body>
+</html>
