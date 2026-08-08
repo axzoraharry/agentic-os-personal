@@ -44,6 +44,12 @@ export const config = {
   zernioApiKey: process.env.ZERNIO_API_KEY ?? "",
   zernioWebhookSecret: process.env.ZERNIO_WEBHOOK_SECRET ?? "",
 
+  // Agent control plane (Mr. Happy / Delegation). Empty = loopback-only access.
+  agentApiKey: process.env.AGENT_API_KEY ?? "",
+
+  // Optional CORS origin for empire dashboard embeds (empty = same-origin only).
+  empireCorsOrigin: process.env.EMPIRE_CORS_ORIGIN ?? "",
+
   googleClientId: process.env.GOOGLE_CLIENT_ID ?? "",
   googleClientSecret: process.env.GOOGLE_CLIENT_SECRET ?? "",
   googleRedirectUri:

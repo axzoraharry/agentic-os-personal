@@ -30,6 +30,7 @@ import { handleZernioWebhook } from "./webhooks/zernio.js";
 import { askAssistant, askAssistantStream } from "./ai/assistant.js";
 import { buildAuthUrl, exchangeCode, gmailConfigured } from "./google/oauth.js";
 import { syncMail, syncExpenses, startAutoSync } from "./autoSync.js";
+import { createAgentRouter } from "./agent/router.js";
 
 recoverStaleJobs();
 
@@ -37,6 +38,9 @@ const app = express();
 app.use(express.json({ limit: "4mb" }));
 app.use(express.static(join(ROOT_DIR, "public")));
 app.use("/storage", express.static(join(ROOT_DIR, "storage")));
+
+// Agent control plane — Commander / Happy Agents (auth: AGENT_API_KEY or loopback)
+app.use("/api/agent", createAgentRouter());
 
 const ok = (res, data) => res.json(data);
 const fail = (res, code, msg) => res.status(code).json({ error: msg });
